@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>YOLO Detekcja Obiektów</title>
+</head>
+<body>
+<h1>YOLO Detekcja Obiektów</h1>
+
+<form method="POST" action="/upload" enctype="multipart/form-data">
+    <input type="file" name="file">
+    <button type="submit">Prześlij obraz</button>
+</form>
+
+{% if result %}
+    <h2>Wynik:</h2>
+    <p>{{ result }}</p>
+{% endif %}
+
+{% if analysis %}
+    <h2>Analiza:</h2>
+    <pre>{{ analysis }}</pre>
+{% endif %}
+
+{% if filename %}
+    <h2>Przetworzony Obraz:</h2>
+    <img src="{{ url_for('static', filename='uploads/' + filename) }}" alt="Przesłany obraz">
+{% endif %}
+</body>
+</html>
