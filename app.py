@@ -14,7 +14,7 @@ UPLOAD_FOLDER = 'static/uploads'
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 
 # Inicjalizacja modelu YOLO (użycie modelu YOLOv5)
-model = torch.hub.load('ultralytics/yolov5', 'yolov5l')  # Możesz użyć 'yolov5m' lub innego modelu
+model = torch.hub.load('ultralytics/yolov5', 'yolov5l')  
 
 # Funkcja do sprawdzenia, czy plik ma dozwolony typ
 def allowed_file(filename):
