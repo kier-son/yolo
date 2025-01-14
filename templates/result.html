@@ -1,0 +1,35 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Detection Results</title>
+</head>
+<body>
+    <h1>Detection Results</h1>
+    <img src="{{ result_image }}" alt="Result Image">
+    <h2>Analysis:</h2>
+    <ul>
+        <li>Number of Apples: {{ apple_count }}</li>
+        <li>Number of Oranges: {{ orange_count }}</li>
+        <li>Total Objects Detected: {{ total_count }}</li>
+    </ul>
+    <h3>Details:</h3>
+    <table border="1">
+        <tr>
+            <th>ID</th>
+            <th>Label</th>
+            <th>Confidence (%)</th>
+        </tr>
+        {% for detail in details %}
+        <tr>
+            <td>{{ detail.id }}</td>
+            <td>{{ detail.label }}</td>
+            <td>{{ (detail.confidence * 100) | round(2) }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+    <br>
+    <a href="/">Upload another image</a>
+</body>
+</html>
