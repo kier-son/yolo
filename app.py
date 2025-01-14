@@ -1,95 +1,115 @@
-import os
 import cv2
-from flask import Flask, request, render_template, jsonify, redirect, flash
-from werkzeug.utils import secure_filename
-from PIL import Image
 import torch
+from flask import Flask, render_template, request
+from PIL import Image
+import numpy as np
+import os
 
-# Inicjalizacja aplikacji Flask
 app = Flask(__name__)
 
-# Konfiguracja dla folderu uploadów
-ALLOWED_EXTENSIONS = {'png', 'jpg', 'jpeg'}
-UPLOAD_FOLDER = 'static/uploads'
-app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+# Ustawienia ścieżek dla przesłanych i wynikowych obrazów
+UPLOAD_FOLDER = 'static/uploads/'
+if not os.path.exists(UPLOAD_FOLDER):
+    os.makedirs(UPLOAD_FOLDER)
 
-# Inicjalizacja modelu YOLO (użycie modelu YOLOv5)
-model = torch.hub.load('ultralytics/yolov5', 'yolov5l')  
+# Załaduj model YOLOv5
+model = torch.hub.load('ultralytics/yolov5', 'yolov5l', pretrained=True)
 
-# Funkcja do sprawdzenia, czy plik ma dozwolony typ
-def allowed_file(filename):
-    return '.' in filename and filename.rsplit('.', 1)[1].lower() in ALLOWED_EXTENSIONS
+def resize_image(image, target_size=(640, 640)):
+    """
+    Skaluje obraz do zadanego rozmiaru.
+
+    Args:
+    - image: Obraz w formacie numpy array.
+    - target_size: Krotka określająca rozmiar docelowy (szerokość, wysokość).
+
+    Returns:
+    - Zmieniony obraz o zadanym rozmiarze.
+    """
+    resized_image = cv2.resize(image, target_size, interpolation=cv2.INTER_LINEAR)
+    return resized_image
+
+def draw_boxes_with_labels(image, detections):
+    """
+    Rysuje prostokąty wokół obiektów i numeruje je.
+
+    Args:
+    - image: Obraz w formacie numpy array.
+    - detections: Wyniki detekcji z modelu YOLOv5.
+
+    Returns:
+    - Annotowany obraz.
+    - Słownik liczący wykryte obiekty oraz ich szczegóły.
+    """
+    font = cv2.FONT_HERSHEY_SIMPLEX
+    font_scale = 0.5
+    font_thickness = 1
+    color = (0, 255, 0)  # Zielony kolor prostokąta i tekstu
+    count = {"apple": 0, "orange": 0}  # Licznik obiektów
+    details = []  # Szczegóły dotyczące obiektów
+
+    for det in detections:
+        label = det['name']
+        confidence = det['confidence']
+        if label in count:
+            count[label] += 1
+            x_min, y_min, x_max, y_max = map(int, det['box'])
+            # Rysowanie prostokąta
+            cv2.rectangle(image, (x_min, y_min), (x_max, y_max), color, 2)
+            # Dodanie etykiety
+            label_text = f"{label} #{count[label]} ({confidence:.2f})"
+            cv2.putText(image, label_text, (x_min, y_min - 10), font, font_scale, color, font_thickness)
+            details.append({"label": label, "confidence": confidence, "id": count[label]})
+
+    return image, count, details
 
 @app.route('/')
 def index():
     return render_template('index.html')
 
 @app.route('/upload', methods=['POST'])
-def upload_image():
+def upload():
     if 'file' not in request.files:
-        flash('No file part')
-        return redirect(request.url)
-
+        return 'No file part'
     file = request.files['file']
-
     if file.filename == '':
-        flash('No selected file')
-        return redirect(request.url)
+        return 'No selected file'
+    if file:
+        # Wczytaj obraz
+        img = Image.open(file.stream)
+        img = img.convert('RGB')
+        img_np = np.array(img)
 
-    if file and allowed_file(file.filename):
-        filename = secure_filename(file.filename)
-        filepath = os.path.join(app.config['UPLOAD_FOLDER'], filename)
-        file.save(filepath)
+        # Skaluj obraz do zalecanego rozmiaru
+        scaled_img = resize_image(img_np)
 
-        # Detekcja obiektów
-        result, analysis = detect_objects(filepath)
+        # Wykonaj detekcję obiektów
+        results = model(scaled_img)
 
-        return render_template('index.html', result=result, analysis=analysis, filename=filename)
+        # Przetwórz wyniki detekcji
+        detections = []
+        for *box, conf, cls in results.xyxy[0].tolist():
+            label = model.names[int(cls)]
+            if label in ['apple', 'orange']:
+                detections.append({'name': label, 'box': box, 'confidence': conf})
 
+        # Rysuj prostokąty i etykiety
+        annotated_img, count, details = draw_boxes_with_labels(scaled_img, detections)
 
-def detect_objects(image_path):
-    # Wczytaj obraz
-    img = Image.open(image_path)
+        # Zapisz wynikowy obraz
+        image_name = file.filename.rsplit('.', 1)[0]
+        result_image_path = os.path.join(UPLOAD_FOLDER, f"{image_name}_result.jpg")
+        cv2.imwrite(result_image_path, cv2.cvtColor(annotated_img, cv2.COLOR_RGB2BGR))
 
-    # Przetwórz obraz modelem
-    results = model(img)
-
-    # Pobierz dane detekcji jako DataFrame
-    pred_df = results.pandas().xywh[0]
-
-    # Debugowanie wyników
-    print("Prediction DataFrame:")
-    print(pred_df)
-
-    # Sprawdź, czy jakiekolwiek obiekty zostały wykryte
-    if pred_df.empty:
-        print("No objects detected.")
-        return "No objects detected.", "Brak wykrytych obiektów."
-
-    # Filtruj dla klas 'apple' (klasa 47) i 'orange' (klasa 49)
-    filtered = pred_df[pred_df['class'].isin([47, 49])]
-
-    if filtered.empty:
-        print("No apples or oranges detected.")
-        return "No apples or oranges detected.", "Brak wykrytych jabłek lub pomarańczy."
-
-    # Twórz analizę
-    analysis = "\n".join(
-        f"Obiekt: {row['name']}, Pewność: {row['confidence']:.2f}, Pozycja: x={row['xcenter']}, y={row['ycenter']}, width={row['width']}, height={row['height']}"
-        for _, row in filtered.iterrows()
-    )
-
-    # Twórz podsumowanie
-    detected_objects = filtered['name'].value_counts().to_dict()
-    result = "Wykryto: " + ", ".join(f"{count}x {name}" for name, count in detected_objects.items())
-
-    print("Analysis:")
-    print(analysis)
-
-    return result, analysis
-
-print("Classes in model:")
-print(model.names)
+        # Przekaż dane do szablonu
+        return render_template(
+            'result.html',
+            result_image=result_image_path,
+            apple_count=count['apple'],
+            orange_count=count['orange'],
+            total_count=count['apple'] + count['orange'],
+            details=details
+        )
 
 if __name__ == '__main__':
     app.run(debug=True)
